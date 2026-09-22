@@ -92,22 +92,15 @@ def _load_explainer():
     return explainer, preprocessor, feature_names
 
 
-def explain_commit(commit_features):
-    """Top-3 features pushing a single commit's score up or down.
+def commit_row(commit_features):
+    """Normalize one commit's raw ApacheJIT feature values - a dict, a
+    `pandas.Series`, or a single-row `DataFrame` - into a single-row
+    `DataFrame` ready for `JITFeaturePreprocessor.transform`.
 
-    `commit_features` is one commit's raw ApacheJIT feature values - a
-    dict, a `pandas.Series`, or a single-row `DataFrame` - covering at
-    least `src.preprocessing.INPUT_FEATURES` (`la`, `ld`, `ns`, `nd`, `nf`,
-    `ent`, `ndev`, `age`, `nuc`, `aexp`, `arexp`, `asexp`); extra columns
-    such as `commit_id` are ignored, so a raw row from
-    `data/processed/test.csv` works directly.
-
-    Returns up to 3 `(feature_name, contribution)` pairs, sorted by
-    `abs(contribution)` descending. `contribution` is that feature's signed
-    SHAP value in log-odds space (positive pushes the score toward
-    "buggy", negative toward "clean") - see the module docstring for why
-    log-odds, not the calibrated probability, is what `LinearExplainer` can
-    attribute additively here.
+    The input must cover at least `src.preprocessing.INPUT_FEATURES` (`la`,
+    `ld`, `ns`, `nd`, `nf`, `ent`, `ndev`, `age`, `nuc`, `aexp`, `arexp`,
+    `asexp`); extra columns such as `commit_id` are ignored, so a raw row
+    from `data/processed/test.csv` works directly.
     """
     if isinstance(commit_features, dict):
         row = pd.DataFrame([commit_features])
@@ -115,7 +108,7 @@ def explain_commit(commit_features):
         row = commit_features.to_frame().T
     elif isinstance(commit_features, pd.DataFrame):
         if len(commit_features) != 1:
-            raise ValueError("explain_commit expects exactly one commit's features")
+            raise ValueError("commit_row expects exactly one commit's features")
         row = commit_features
     else:
         raise TypeError(f"Unsupported commit_features type: {type(commit_features)}")
@@ -127,7 +120,22 @@ def explain_commit(commit_features):
     numeric_cols = [c for c in INPUT_FEATURES if c in row.columns]
     row = row.copy()
     row[numeric_cols] = row[numeric_cols].apply(pd.to_numeric)
+    return row
 
+
+def explain_commit(commit_features):
+    """Top-3 features pushing a single commit's score up or down.
+
+    `commit_features` follows the same contract as `commit_row()`.
+
+    Returns up to 3 `(feature_name, contribution)` pairs, sorted by
+    `abs(contribution)` descending. `contribution` is that feature's signed
+    SHAP value in log-odds space (positive pushes the score toward
+    "buggy", negative toward "clean") - see the module docstring for why
+    log-odds, not the calibrated probability, is what `LinearExplainer` can
+    attribute additively here.
+    """
+    row = commit_row(commit_features)
     explainer, preprocessor, feature_names = _load_explainer()
     X = preprocessor.transform(row)
     shap_values = explainer(X).values[0]
