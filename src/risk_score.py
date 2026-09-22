@@ -19,7 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import joblib
 import pandas as pd
 
-from src.interpret import LABEL_COLUMN, MODEL_FILE, TEST_FILE, commit_row, explain_commit
+from src.interpret import LABEL_COLUMN, MODEL_FILE, TEST_FILE, TRAIN_FILE, commit_row, explain_commit
+from src.preprocessing import OUTPUT_FEATURES
 
 # (inclusive upper bound, band name), checked in ascending order.
 BANDS = [
@@ -29,21 +30,10 @@ BANDS = [
     (100, "Critical"),
 ]
 
-# Short plain-language label for each feature LinearExplainer can attribute
-# to (src.preprocessing.OUTPUT_FEATURES); direction ("up"/"down") is derived
-# from the sign of that commit's SHAP contribution, not hardcoded here.
-FEATURE_DESCRIPTIONS = {
-    "la": "Large change",
-    "ld": "Large deletion",
-    "ns": "Many subsystems touched",
-    "nd": "Many directories touched",
-    "ent": "Changes spread across many files",
-    "ndev": "Many recent contributors",
-    "age": "Files not recently touched",
-    "nuc": "Frequently-changed files",
-    "aexp": "Experienced author",
-    "asexp": "Author familiar with this subsystem",
-}
+# Median of each SHAP-attributable feature (src.preprocessing.OUTPUT_FEATURES)
+# over the training split, loaded once so `_reason` can describe a commit's
+# raw feature value as above/below "typical" without re-reading the CSV.
+FEATURE_MEDIANS = pd.read_csv(TRAIN_FILE)[OUTPUT_FEATURES].median()
 
 
 def _band(score):
@@ -53,10 +43,20 @@ def _band(score):
     raise AssertionError(f"score {score} out of the expected 0-100 range")
 
 
-def _reason(feature_name, contribution):
-    description = FEATURE_DESCRIPTIONS.get(feature_name, feature_name)
+def _format_value(value):
+    return f"{round(value, 2):g}"
+
+
+def _reason(feature_name, contribution, value):
+    median = FEATURE_MEDIANS[feature_name]
+    if value > median:
+        comparison = "above median"
+    elif value < median:
+        comparison = "below median"
+    else:
+        comparison = "at median"
     direction = "up" if contribution > 0 else "down"
-    return f"{description} ({feature_name}) - pushes risk {direction}"
+    return f"{feature_name} = {_format_value(value)} ({comparison}) - pushes risk {direction}"
 
 
 @lru_cache(maxsize=1)
@@ -82,7 +82,8 @@ def risk_score(commit_features):
 
     score = round(100 * probability)
     top_reasons = [
-        _reason(name, contribution) for name, contribution in explain_commit(commit_features)
+        _reason(name, contribution, row[name].iloc[0])
+        for name, contribution in explain_commit(commit_features)
     ]
 
     return {"score": score, "band": _band(score), "top_reasons": top_reasons}
