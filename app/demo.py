@@ -36,6 +36,32 @@ BAND_COLORS = {
     "Critical": "#c62828",
 }
 
+# Plain-English names for every raw ApacheJIT feature code (src.preprocessing
+# .INPUT_FEATURES), used only to relabel src.risk_score's reason strings for
+# display - the underlying value/median/direction logic is untouched.
+FEATURE_NAMES = {
+    "la": "lines of code added",
+    "ld": "lines of code deleted",
+    "ns": "number of subsystems touched",
+    "nd": "number of directories touched",
+    "nf": "number of files touched",
+    "ent": "how spread out the change is across files",
+    "ndev": "number of developers who've recently touched these files",
+    "age": "time since these files were last changed",
+    "nuc": "number of recent changes to these files",
+    "aexp": "author's past commit experience",
+    "arexp": "author's recent commit experience",
+    "asexp": "author's experience in this subsystem",
+}
+
+# Matches the fixed format of src.risk_score._reason:
+# "{feature} = {value} ({comparison}) - pushes risk {direction}"
+REASON_RE = re.compile(
+    r"^(?P<feature>\S+) = (?P<value>.+?) "
+    r"\((?P<comparison>above median|below median|at median)\) "
+    r"- pushes risk (?P<direction>up|down)$"
+)
+
 st.set_page_config(page_title="JIT Defect Risk", page_icon="\U0001F6A6", layout="centered")
 
 
@@ -60,6 +86,22 @@ def load_scored_sample():
 
 def percentile_of(score, scores):
     return 100 * float((scores <= score).mean())
+
+
+def humanize_reason(reason):
+    """Relabel a `src.risk_score` reason string with a plain-English feature
+    name for display. Purely cosmetic: the value/median/direction it reports
+    are parsed straight out of the original string, not recomputed.
+    """
+    match = REASON_RE.match(reason)
+    if not match:
+        return reason
+
+    name = FEATURE_NAMES.get(match["feature"], match["feature"])
+    return (
+        f"**{name}** = {match['value']} ({match['comparison']}) "
+        f"- pushes risk {match['direction']}"
+    )
 
 
 def parse_pasted_commit(text):
@@ -117,16 +159,37 @@ def render_result(result, scores):
         unsafe_allow_html=True,
     )
     st.caption(
+        "This is the model's estimated probability (0-100) that this commit "
+        "introduces a bug, calibrated against real outcomes."
+    )
+
+    st.caption(
         f"{percentile_of(score, scores):.0f}th percentile among {len(scores)} sampled test commits"
+    )
+    st.caption(
+        "In other words: this commit is riskier than that percentage of the "
+        "sample commits shown in this demo."
     )
 
     st.subheader("Top reasons")
     for reason in result["top_reasons"]:
-        st.markdown(f"- {reason}")
+        st.markdown(f"- {humanize_reason(reason)}")
 
 
 def main():
     st.title("JIT Defect Risk Score")
+
+    with st.expander("What is this?", expanded=False):
+        st.markdown(
+            "This tool predicts whether a code commit is **likely to introduce "
+            "a bug**, at the moment it's made - before it's ever tested. It "
+            "learned the patterns behind risky changes from **106,674 real "
+            "commits** across **15 Apache open-source projects**, using signals "
+            "like how much code changed, how experienced the author is, and how "
+            "spread out the change is across files. Pick a real commit below (or "
+            "paste your own) to see its risk score and the reasons behind it."
+        )
+
     st.write(
         "Pick a sample commit or paste a commit's ApacheJIT features to see "
         "its predicted risk of introducing a bug."
