@@ -36,22 +36,50 @@ BAND_COLORS = {
     "Critical": "#c62828",
 }
 
-# Plain-English names for every raw ApacheJIT feature code (src.preprocessing
-# .INPUT_FEATURES), used only to relabel src.risk_score's reason strings for
-# display - the underlying value/median/direction logic is untouched.
+# Plain-English names + one-line descriptions for every raw ApacheJIT feature
+# code (src.preprocessing.INPUT_FEATURES). Used to relabel src.risk_score's
+# reason strings for display (name only) and to render the paste-mode
+# glossary (name + description) - the underlying scoring logic is untouched.
 FEATURE_NAMES = {
-    "la": "lines of code added",
-    "ld": "lines of code deleted",
-    "ns": "number of subsystems touched",
-    "nd": "number of directories touched",
-    "nf": "number of files touched",
-    "ent": "how spread out the change is across files",
-    "ndev": "number of developers who've recently touched these files",
-    "age": "time since these files were last changed",
-    "nuc": "number of recent changes to these files",
-    "aexp": "author's past commit experience",
-    "arexp": "author's recent commit experience",
-    "asexp": "author's experience in this subsystem",
+    "la": ("lines of code added", "how many new lines this commit adds"),
+    "ld": ("lines of code deleted", "how many lines this commit removes"),
+    "ns": (
+        "number of subsystems touched",
+        "how many distinct subsystems (top-level modules) this commit changes",
+    ),
+    "nd": (
+        "number of directories touched",
+        "how many different directories this commit changes",
+    ),
+    "nf": ("number of files touched", "how many files this commit changes"),
+    "ent": (
+        "how spread out the change is across files",
+        "whether the change is concentrated in one file or scattered across many",
+    ),
+    "ndev": (
+        "number of developers who've recently touched these files",
+        "how many different people have recently worked on these files",
+    ),
+    "age": (
+        "time since these files were last changed",
+        "how long it's been since these files were last modified",
+    ),
+    "nuc": (
+        "number of recent changes to these files",
+        "how many times these files have recently been changed",
+    ),
+    "aexp": (
+        "author's past commit experience",
+        "how many prior commits this author has made",
+    ),
+    "arexp": (
+        "author's recent commit experience",
+        "how many commits this author has made recently",
+    ),
+    "asexp": (
+        "author's experience in this subsystem",
+        "how many prior commits this author has made in this specific subsystem",
+    ),
 }
 
 # Matches the fixed format of src.risk_score._reason:
@@ -97,7 +125,7 @@ def humanize_reason(reason):
     if not match:
         return reason
 
-    name = FEATURE_NAMES.get(match["feature"], match["feature"])
+    name, _description = FEATURE_NAMES.get(match["feature"], (match["feature"], ""))
     return (
         f"**{name}** = {match['value']} ({match['comparison']}) "
         f"- pushes risk {match['direction']}"
@@ -207,6 +235,20 @@ def main():
     else:
         example_row = sample.iloc[0]
         example = ", ".join(f"{f}={example_row[f]}" for f in INPUT_FEATURES)
+
+        st.caption(
+            "These values are computed automatically from a real commit's "
+            "git history - you'd normally never type these by hand; this box "
+            "is here to let you test specific scenarios."
+        )
+        glossary = pd.DataFrame(
+            [
+                {"Code": code, "Name": FEATURE_NAMES[code][0], "What it measures": FEATURE_NAMES[code][1]}
+                for code in INPUT_FEATURES
+            ]
+        )
+        st.dataframe(glossary, hide_index=True, use_container_width=True)
+
         text = st.text_area(
             "Commit metadata",
             placeholder=(
